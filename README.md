@@ -37,6 +37,21 @@ Most real-world recommenders (Spotify, Netflix, YouTube) blend two approaches: c
 - `target_energy`
 - `likes_acoustic`
 
+### Algorithm Recipe
+
+Each song is scored independently against the user's profile by summing points from four rules, then all songs are sorted by that score and the top `k` are returned:
+
+| Rule | Condition | Points |
+| --- | --- | --- |
+| Genre match | `song.genre == favorite_genre` | `+2.0` |
+| Mood match | `song.mood == favorite_mood` | `+1.0` |
+| Energy closeness | scaled by distance from `target_energy` | `2.0 * (1 - abs(song.energy - target_energy))` (0 to 2.0) |
+| Acoustic threshold | `likes_acoustic` is `True` and `song.acousticness > 0.6` | `+1.0` |
+
+Genre gets the largest flat bonus because it's the strongest single predictor of whether a listener will even give a song a chance. Energy is scaled rather than flat so a near-miss (0.40 vs. a target of 0.35) still earns most of its points, instead of an all-or-nothing cliff. Acousticness is a threshold rather than a scaled score because `likes_acoustic` is a boolean preference, not a target value to converge on.
+
+**Potential bias:** because genre (+2.0) outweighs mood (+1.0) and can outweigh a partial energy match, the system can over-prioritize genre — a `lofi` song with the wrong mood and off-target energy can still outscore a non-`lofi` song that matches the user's mood and energy closely. Listeners with broad genre taste but strong mood/energy preferences may get recommendations that feel genre-correct but emotionally off.
+
 ---
 
 ## Getting Started
