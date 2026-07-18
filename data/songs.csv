@@ -1,11 +1,19 @@
-id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness
-1,Sunrise City,Neon Echo,pop,happy,0.82,118,0.84,0.79,0.18
-2,Midnight Coding,LoRoom,lofi,chill,0.42,78,0.56,0.62,0.71
-3,Storm Runner,Voltline,rock,intense,0.91,152,0.48,0.66,0.10
-4,Library Rain,Paper Lanterns,lofi,chill,0.35,72,0.60,0.58,0.86
-5,Gym Hero,Max Pulse,pop,intense,0.93,132,0.77,0.88,0.05
-6,Spacewalk Thoughts,Orbit Bloom,ambient,chill,0.28,60,0.65,0.41,0.92
-7,Coffee Shop Stories,Slow Stereo,jazz,relaxed,0.37,90,0.71,0.54,0.89
-8,Night Drive Loop,Neon Echo,synthwave,moody,0.75,110,0.49,0.73,0.22
-9,Focus Flow,LoRoom,lofi,focused,0.40,80,0.59,0.60,0.78
-10,Rooftop Lights,Indigo Parade,indie pop,happy,0.76,124,0.81,0.82,0.35
+id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness,instrumentalness,liveness
+1,Sunrise City,Neon Echo,pop,happy,0.82,118,0.84,0.79,0.18,0.02,0.12
+2,Midnight Coding,LoRoom,lofi,chill,0.42,78,0.56,0.62,0.71,0.65,0.10
+3,Storm Runner,Voltline,rock,intense,0.91,152,0.48,0.66,0.10,0.05,0.35
+4,Library Rain,Paper Lanterns,lofi,chill,0.35,72,0.60,0.58,0.86,0.80,0.08
+5,Gym Hero,Max Pulse,pop,intense,0.93,132,0.77,0.88,0.05,0.01,0.15
+6,Spacewalk Thoughts,Orbit Bloom,ambient,chill,0.28,60,0.65,0.41,0.92,0.88,0.05
+7,Coffee Shop Stories,Slow Stereo,jazz,relaxed,0.37,90,0.71,0.54,0.89,0.55,0.45
+8,Night Drive Loop,Neon Echo,synthwave,moody,0.75,110,0.49,0.73,0.22,0.40,0.10
+9,Focus Flow,LoRoom,lofi,focused,0.40,80,0.59,0.60,0.78,0.85,0.06
+10,Rooftop Lights,Indigo Parade,indie pop,happy,0.76,124,0.81,0.82,0.35,0.02,0.20
+11,Concrete Kingdom,MC Solace,hip-hop,confident,0.72,95,0.68,0.85,0.08,0.00,0.15
+12,Moonlit Sonata Reimagined,Elena Voss,classical,peaceful,0.20,66,0.55,0.15,0.95,0.98,0.25
+13,Dusty Highway,Wade Carter,country,nostalgic,0.55,100,0.60,0.50,0.68,0.03,0.30
+14,Pulse Horizon,DJ Kinetic,EDM,euphoric,0.95,128,0.88,0.92,0.02,0.15,0.35
+15,Iron Descent,Grave Circuit,metal,aggressive,0.97,168,0.25,0.40,0.02,0.05,0.40
+16,Velvet Whisper,Simone Rae,R&B,romantic,0.48,88,0.65,0.68,0.30,0.01,0.12
+17,Riverbend Ashes,Hollow Pine,folk,melancholic,0.30,76,0.32,0.35,0.82,0.10,0.28
+18,Carnival Sol,Ritmo Dorado,latin,festive,0.85,104,0.90,0.90,0.25,0.02,0.50
