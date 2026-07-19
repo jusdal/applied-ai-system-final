@@ -9,11 +9,59 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
-from recommender import DEFAULT_WEIGHTS, load_songs, recommend_songs
+import argparse
+
+from tabulate import tabulate
+
+from src.recommender import (
+    DEFAULT_ARTIST_PENALTY,
+    DEFAULT_WEIGHTS,
+    RANKING_STRATEGIES,
+    load_songs,
+    recommend_with_strategy,
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the music recommender simulation.")
+    parser.add_argument(
+        "--mode",
+        choices=sorted(RANKING_STRATEGIES),
+        default="balanced",
+        help="Ranking strategy used for the core and edge-case profiles (default: balanced).",
+    )
+    parser.add_argument(
+        "--diversify",
+        action="store_true",
+        help="Penalize repeat artists in the top-k so one artist can't dominate the list.",
+    )
+    parser.add_argument(
+        "--artist-penalty",
+        type=float,
+        default=DEFAULT_ARTIST_PENALTY,
+        help=f"Points deducted per repeat artist when --diversify is set (default: {DEFAULT_ARTIST_PENALTY}).",
+    )
+    return parser.parse_args()
+
+
+def format_recommendations(recommendations) -> str:
+    """Render (song, score, explanation) tuples as a readable table, reasons included."""
+    rows = [
+        [i + 1, song["title"], song["artist"], f"{score:.2f}", explanation]
+        for i, (song, score, explanation) in enumerate(recommendations)
+    ]
+    return tabulate(
+        rows,
+        headers=["#", "Title", "Artist", "Score", "Why"],
+        tablefmt="fancy_grid",
+        maxcolwidths=[None, 20, 16, None, 45],
+    )
 
 
 def main() -> None:
+    args = parse_args()
     songs = load_songs("data/songs.csv")
+    mode_label = RANKING_STRATEGIES[args.mode].name
 
     # Taste profiles: keys map to the features identified in Step 1 (see README
     # "Features used"): genre/mood are matched categorically, energy is compared
@@ -39,18 +87,20 @@ def main() -> None:
         },
     }
 
+    diversify_label = f", diversify (penalty {args.artist_penalty})" if args.diversify else ""
+    print(f"\nRanking mode: {mode_label} ({args.mode}){diversify_label}")
     for profile_name, user_prefs in user_profiles.items():
-        recommendations = recommend_songs(user_prefs, songs, k=5)
+        recommendations = recommend_with_strategy(
+            user_prefs,
+            songs,
+            k=5,
+            mode=args.mode,
+            diversify=args.diversify,
+            artist_penalty=args.artist_penalty,
+        )
 
         print(f"\n=== {profile_name} ===")
-        print("Top recommendations:\n")
-        for rec in recommendations:
-            # You decide the structure of each returned item.
-            # A common pattern is: (song, score, explanation)
-            song, score, explanation = rec
-            print(f"{song['title']} - Score: {score:.2f}")
-            print(f"Because: {explanation}")
-            print()
+        print(format_recommendations(recommendations))
 
     # Adversarial / edge-case profiles: each targets a specific weak point in
     # score_song (contradictory signals, missing keys, case sensitivity,
@@ -104,17 +154,19 @@ def main() -> None:
         print(f"\n=== [EDGE CASE] {profile_name} ===")
         print(f"Profile: {user_prefs}")
         try:
-            recommendations = recommend_songs(user_prefs, songs, k=5)
+            recommendations = recommend_with_strategy(
+                user_prefs,
+                songs,
+                k=5,
+                mode=args.mode,
+                diversify=args.diversify,
+                artist_penalty=args.artist_penalty,
+            )
         except Exception as exc:
             print(f"-> FAILED: {type(exc).__name__}: {exc}")
             continue
 
-        print("Top recommendations:\n")
-        for rec in recommendations:
-            song, score, explanation = rec
-            print(f"{song['title']} - Score: {score:.2f}")
-            print(f"Because: {explanation}")
-            print()
+        print(format_recommendations(recommendations))
 
     # Experiment: Weight Shift — double the importance of energy, halve genre.
     # Reruns the same profiles under both weight sets so we can compare
@@ -142,20 +194,61 @@ def main() -> None:
     print(f"Shifted weights:  {shifted_weights}")
 
     for profile_name, user_prefs in experiment_profiles.items():
-        default_recs = recommend_songs(user_prefs, songs, k=5)
-        shifted_recs = recommend_songs(user_prefs, songs, k=5, weights=shifted_weights)
+        default_recs = recommend_with_strategy(user_prefs, songs, k=5, mode="balanced")
+        shifted_recs = recommend_with_strategy(
+            user_prefs, songs, k=5, mode="balanced", weights=shifted_weights
+        )
 
         print(f"\n=== {profile_name} ===")
         print(f"Profile: {user_prefs}\n")
 
         print("-- Default weights --")
-        for song, score, explanation in default_recs:
-            print(f"{song['title']} - Score: {score:.2f}  ({explanation})")
+        print(format_recommendations(default_recs))
 
         print("\n-- Shifted weights (genre 1.0, energy x4) --")
-        for song, score, explanation in shifted_recs:
-            print(f"{song['title']} - Score: {score:.2f}  ({explanation})")
-        print()
+        print(format_recommendations(shifted_recs))
+
+    # Ranking mode comparison: run one profile through every strategy in
+    # RANKING_STRATEGIES, using the *shifted* weights (genre already
+    # de-emphasized) so the comparison isolates what mode alone changes.
+    # Under shifted weights, Balanced already stops favoring the mismatched
+    # rock song (see the weight-shift experiment above) - but Genre-First
+    # still forces it to #1 regardless of weights, because its tier is a
+    # hard rule, not a score. That's the actual difference between "tune the
+    # weights" and "change the ranking strategy."
+    mode_comparison_profile = experiment_profiles["Calm Rock Contradiction"]
+
+    print("\n\n############ RANKING MODE COMPARISON (Calm Rock Contradiction, shifted weights) ############")
+    print(f"Profile: {mode_comparison_profile}")
+    print(f"Weights: {shifted_weights}")
+    for mode_key, strategy in RANKING_STRATEGIES.items():
+        recommendations = recommend_with_strategy(
+            mode_comparison_profile, songs, k=5, mode=mode_key, weights=shifted_weights
+        )
+        print(f"\n-- {strategy.name} ({mode_key}) --")
+        print(format_recommendations(recommendations))
+
+    # Diversity comparison: "Chill Lofi" pulls two of its top picks from the
+    # same artist (LoRoom - Midnight Coding and Focus Flow), a mini "filter
+    # bubble" where one artist quietly takes multiple slots just because both
+    # songs fit the profile well. Compare with/without --diversify to show
+    # the artist penalty spreading the list out instead.
+    diversity_profile_name = "Chill Lofi"
+    diversity_profile = user_profiles[diversity_profile_name]
+
+    print(f"\n\n############ DIVERSITY COMPARISON ({diversity_profile_name}) ############")
+    print(f"Profile: {diversity_profile}")
+
+    plain_recs = recommend_with_strategy(diversity_profile, songs, k=5, mode="balanced")
+    diverse_recs = recommend_with_strategy(
+        diversity_profile, songs, k=5, mode="balanced", diversify=True
+    )
+
+    print("\n-- Without diversity penalty --")
+    print(format_recommendations(plain_recs))
+
+    print(f"\n-- With diversity penalty (-{DEFAULT_ARTIST_PENALTY} per repeat artist) --")
+    print(format_recommendations(diverse_recs))
 
 
 if __name__ == "__main__":

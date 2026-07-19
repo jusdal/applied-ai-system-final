@@ -57,6 +57,8 @@ Add it all up, sort every song by total points, and hand back the top 5 with a n
 
 The one change from the starter version: the point values (2, 1, 2, 1) used to be locked in. Now they can be swapped out, so we could actually test "what if energy mattered more than genre" instead of just guessing.
 
+**Diversity / fairness: the artist penalty.** Points alone can let one artist quietly take multiple slots in the top 5 just because two of their songs both happen to fit the profile — LoRoom does this by default for the Chill Lofi profile, landing both "Midnight Coding" and "Focus Flow" in the same top 5. That's a small-scale version of the "filter bubble" real recommenders get criticized for: once you're identified as liking something, the system keeps handing you more of the same thing instead of spreading exposure around. `--diversify` turns on a repeat-artist penalty: every time an artist is picked, their remaining songs lose 1.5 points before the next pick is chosen, so a second song from someone already picked has to be a noticeably stronger match than a first song from someone new, not just an equal one. It doesn't add or remove songs from the catalog — it only reorders the same candidates so a single artist can't dominate purely by luck of having multiple good-fit songs. This is a fairness lever pointed at *artists*, not at genres — it doesn't touch the genre-over-mood bias described in section 6, since that's about which *attribute* wins, not which *artist* wins.
+
 ---
 
 ## 4. Data
