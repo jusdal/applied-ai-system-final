@@ -93,15 +93,187 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Sample Recommendation Output
 
-Paste a sample of your recommender's output here as a text block so a reader can see what it produces:
+Output from `python -m src.main`, one fenced block per user profile.
+
+### Core taste profiles
+
+**High-Energy Pop** — `{genre: pop, mood: euphoric, energy: 0.85, likes_acoustic: False}`
 
 ```
-# e.g.:
-# User profile: genre=indie, mood=chill, energy=low
-# Recommendations:
-#   1. ...
-#   2. ...
-#   3. ...
+Sunrise City - Score: 3.94
+Because: genre match (+2.0), energy closeness (+1.94)
+
+Gym Hero - Score: 3.84
+Because: genre match (+2.0), energy closeness (+1.84)
+
+Pulse Horizon - Score: 2.80
+Because: mood match (+1.0), energy closeness (+1.80)
+
+Carnival Sol - Score: 2.00
+Because: energy closeness (+2.00)
+
+Storm Runner - Score: 1.88
+Because: energy closeness (+1.88)
+```
+
+**Chill Lofi** — `{genre: lofi, mood: chill, energy: 0.35, likes_acoustic: True}`
+
+```
+Library Rain - Score: 6.00
+Because: genre match (+2.0), mood match (+1.0), energy closeness (+2.00), acoustic match (+1.0)
+
+Midnight Coding - Score: 5.86
+Because: genre match (+2.0), mood match (+1.0), energy closeness (+1.86), acoustic match (+1.0)
+
+Focus Flow - Score: 4.90
+Because: genre match (+2.0), energy closeness (+1.90), acoustic match (+1.0)
+
+Spacewalk Thoughts - Score: 3.86
+Because: mood match (+1.0), energy closeness (+1.86), acoustic match (+1.0)
+
+Coffee Shop Stories - Score: 2.96
+Because: energy closeness (+1.96), acoustic match (+1.0)
+```
+
+**Deep Intense Rock** — `{genre: rock, mood: intense, energy: 0.9, likes_acoustic: False}`
+
+```
+Storm Runner - Score: 4.98
+Because: genre match (+2.0), mood match (+1.0), energy closeness (+1.98)
+
+Gym Hero - Score: 2.94
+Because: mood match (+1.0), energy closeness (+1.94)
+
+Pulse Horizon - Score: 1.90
+Because: energy closeness (+1.90)
+
+Carnival Sol - Score: 1.90
+Because: energy closeness (+1.90)
+
+Iron Descent - Score: 1.86
+Because: energy closeness (+1.86)
+```
+
+### Adversarial / edge-case profiles
+
+**Conflicting Energy/Mood** — `{genre: rock, mood: peaceful, energy: 0.95, likes_acoustic: False}`
+
+```
+Storm Runner - Score: 3.92
+Because: genre match (+2.0), energy closeness (+1.92)
+
+Pulse Horizon - Score: 2.00
+Because: energy closeness (+2.00)
+
+Gym Hero - Score: 1.96
+Because: energy closeness (+1.96)
+
+Iron Descent - Score: 1.96
+Because: energy closeness (+1.96)
+
+Carnival Sol - Score: 1.80
+Because: energy closeness (+1.80)
+```
+
+**Acoustic Paradox** — `{genre: metal, mood: aggressive, energy: 0.9, likes_acoustic: True}`
+
+```
+Iron Descent - Score: 4.86
+Because: genre match (+2.0), mood match (+1.0), energy closeness (+1.86)
+
+Dusty Highway - Score: 2.30
+Because: energy closeness (+1.30), acoustic match (+1.0)
+
+Midnight Coding - Score: 2.04
+Because: energy closeness (+1.04), acoustic match (+1.0)
+
+Focus Flow - Score: 2.00
+Because: energy closeness (+1.00), acoustic match (+1.0)
+
+Storm Runner - Score: 1.98
+Because: energy closeness (+1.98)
+```
+
+**Missing Genre Key** — `{mood: chill, energy: 0.4}` (no `genre` key)
+
+```
+-> FAILED: KeyError: 'genre'
+```
+
+**Case Mismatch** — `{genre: Lofi, mood: Chill, energy: 0.3, likes_acoustic: True}`
+
+```
+Riverbend Ashes - Score: 3.00
+Because: energy closeness (+2.00), acoustic match (+1.0)
+
+Spacewalk Thoughts - Score: 2.96
+Because: energy closeness (+1.96), acoustic match (+1.0)
+
+Library Rain - Score: 2.90
+Because: energy closeness (+1.90), acoustic match (+1.0)
+
+Coffee Shop Stories - Score: 2.86
+Because: energy closeness (+1.86), acoustic match (+1.0)
+
+Focus Flow - Score: 2.80
+Because: energy closeness (+1.80), acoustic match (+1.0)
+```
+
+**Unknown Genre** — `{genre: k-pop, mood: happy, energy: 0.7, likes_acoustic: False}`
+
+```
+Rooftop Lights - Score: 2.88
+Because: mood match (+1.0), energy closeness (+1.88)
+
+Sunrise City - Score: 2.76
+Because: mood match (+1.0), energy closeness (+1.76)
+
+Concrete Kingdom - Score: 1.96
+Because: energy closeness (+1.96)
+
+Night Drive Loop - Score: 1.90
+Because: energy closeness (+1.90)
+
+Dusty Highway - Score: 1.70
+Because: energy closeness (+1.70)
+```
+
+**Out-of-Range Energy** — `{genre: EDM, mood: euphoric, energy: 5.0, likes_acoustic: False}`
+
+```
+Pulse Horizon - Score: 3.00
+Because: genre match (+2.0), mood match (+1.0), energy closeness (+0.00)
+
+Sunrise City - Score: 0.00
+Because: energy closeness (+0.00)
+
+Midnight Coding - Score: 0.00
+Because: energy closeness (+0.00)
+
+Storm Runner - Score: 0.00
+Because: energy closeness (+0.00)
+
+Library Rain - Score: 0.00
+Because: energy closeness (+0.00)
+```
+
+**Empty Genre/Mood** — `{genre: "", mood: "", energy: 0.5, likes_acoustic: False}`
+
+```
+Velvet Whisper - Score: 1.96
+Because: energy closeness (+1.96)
+
+Dusty Highway - Score: 1.90
+Because: energy closeness (+1.90)
+
+Midnight Coding - Score: 1.84
+Because: energy closeness (+1.84)
+
+Focus Flow - Score: 1.80
+Because: energy closeness (+1.80)
+
+Coffee Shop Stories - Score: 1.74
+Because: energy closeness (+1.74)
 ```
 
 **Screenshot or video** _(optional)_: <!-- Insert a screenshot or demo video link here -->

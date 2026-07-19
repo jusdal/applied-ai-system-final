@@ -71,34 +71,38 @@ def load_songs(csv_path: str) -> List[Dict]:
     print(f"Loaded songs: {len(songs)}")
     return songs
 
-def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
+DEFAULT_WEIGHTS = {"genre": 2.0, "mood": 1.0, "energy": 2.0, "acoustic": 1.0}
+
+
+def score_song(user_prefs: Dict, song: Dict, weights: Optional[Dict] = None) -> Tuple[float, List[str]]:
     """Score one song against user_prefs using the Algorithm Recipe and return (score, reasons)."""
+    weights = weights or DEFAULT_WEIGHTS
     score = 0.0
     reasons = []
 
     if song["genre"] == user_prefs["genre"]:
-        score += 2.0
-        reasons.append("genre match (+2.0)")
+        score += weights["genre"]
+        reasons.append(f"genre match (+{weights['genre']:.1f})")
 
     if song["mood"] == user_prefs["mood"]:
-        score += 1.0
-        reasons.append("mood match (+1.0)")
+        score += weights["mood"]
+        reasons.append(f"mood match (+{weights['mood']:.1f})")
 
-    energy_points = max(0.0, 2.0 * (1 - abs(song["energy"] - user_prefs["energy"])))
+    energy_points = max(0.0, weights["energy"] * (1 - abs(song["energy"] - user_prefs["energy"])))
     score += energy_points
     reasons.append(f"energy closeness (+{energy_points:.2f})")
 
     if user_prefs.get("likes_acoustic") and song["acousticness"] > 0.6:
-        score += 1.0
-        reasons.append("acoustic match (+1.0)")
+        score += weights["acoustic"]
+        reasons.append(f"acoustic match (+{weights['acoustic']:.1f})")
 
     return score, reasons
 
-def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
+def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5, weights: Optional[Dict] = None) -> List[Tuple[Dict, float, str]]:
     """Score every song against user_prefs and return the top k, sorted highest score first."""
     scored = []
     for song in songs:
-        score, reasons = score_song(user_prefs, song)
+        score, reasons = score_song(user_prefs, song, weights)
         scored.append((song, score, ", ".join(reasons)))
 
     scored.sort(key=lambda item: item[1], reverse=True)
