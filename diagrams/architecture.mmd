@@ -1,0 +1,80 @@
+flowchart TD
+
+    subgraph INPUT["Input"]
+        ARGS["CLI args\n--mode  --diversify  --artist-penalty"]
+        PREFS["UserProfile / user_prefs dict"]
+    end
+
+    ARGS --> V1
+    PREFS --> V1
+    ARGS --> V2
+    PREFS --> V2
+
+    V1{{"validate_user_prefs()\n(inside recommend_with_strategy)"}}
+    V2{{"validate_user_prefs()\n(inside compute_agreement)"}}
+
+    V1 -->|invalid: ProfileValidationError| STOP1["log error / print '-> INVALID PROFILE'\nSTOP — no recommendation"]
+    V2 -->|invalid: ProfileValidationError| STOP2["log error / print '-> INVALID PROFILE'\nSTOP — no confidence score"]
+
+    V1 -->|valid| SELECT["select strategy = RANKING_STRATEGIES[--mode]"]
+    V2 -->|valid| ALLSTRAT["run ALL THREE strategies\n(independent of --mode)"]
+
+    subgraph SCORING["Scoring — recommend_with_strategy()"]
+        SELECT --> RANK["strategy.rank(user_prefs, songs)\n→ score_song() per song"]
+        RANK --> DIVCHECK{"--diversify?"}
+        DIVCHECK -->|yes| DIV["apply_artist_diversity()\n(greedy, post-ranking)"]
+        DIVCHECK -->|no| TOPK["ranked[:k]"]
+        DIV --> RECS["recommendations (top k)"]
+        TOPK --> RECS
+    end
+
+    subgraph RELIABILITY["Reliability layer — compute_agreement()"]
+        ALLSTRAT --> BAL["BalancedStrategy.rank()"]
+        ALLSTRAT --> GEN["GenreFirstStrategy.rank()"]
+        ALLSTRAT --> ENE["EnergySimilarityStrategy.rank()"]
+        BAL --> AGREE["top1_agreement + avg_jaccard\n→ confidence"]
+        GEN --> AGREE
+        ENE --> AGREE
+        AGREE --> LABEL["confidence_label()\n→ High / Medium / Low"]
+    end
+
+    RECS --> OUT
+    LABEL --> OUT
+    OUT["format_recommendations() table\n+ format_confidence() badge"]
+
+    OUT --> HUMAN(["🧑 Human review point:\nconfidence badge tells the reviewer whether\nto trust the top pick or re-run with a different --mode"])
+
+    NOTEDUP["Note: same user_prefs is validated twice,\nfully independently — neither function trusts\nthe other's validation, no shared state.\nBoth calls now sit inside one try/except in\nthe profile loop (src/main.py), so either\nraising ProfileValidationError produces the\nsame clean outcome: logged error, continue\nto next profile, no crash."]
+    V1 -.-> NOTEDUP
+    V2 -.-> NOTEDUP
+
+    NOTE1["Note: --diversify only reorders the\nrecommend_with_strategy() output.\ncompute_agreement() always reruns strategies\nUN-diversified — diversity does NOT feed confidence.\n(Deliberate design choice, not an oversight.)"]
+    DIV -.-> NOTE1
+    ALLSTRAT -.-> NOTE1
+
+    subgraph EVALPATH["eval.py — offline dev/CI tool, NOT part of the live runtime path"]
+        direction TB
+        PROFILES["PROFILES list\n(3 core + 6 adversarial profiles)"]
+        PROFILES --> RUNP["run_profile() per profile"]
+        RUNP --> V3["validate_user_prefs()"]
+        V3 -->|rejected as expected| PASS1["PASS — validation caught bad input"]
+        V3 -->|mismatch vs expect_valid| FAIL1["FAIL — validation gap"]
+        V3 -->|valid| PIPE["recommend_with_strategy()\n+ compute_agreement()"]
+        PIPE -->|exception| FAIL2["FAIL — unexpected crash"]
+        PIPE -->|ok| PASS2["PASS — scored, confidence label produced"]
+        PASS1 --> TABLE
+        FAIL1 --> TABLE
+        PASS2 --> TABLE
+        FAIL2 --> TABLE
+        TABLE["PASS/FAIL summary table\nexit 0 if all pass, else exit 1"]
+    end
+
+    classDef human fill:#2b6cb0,color:#fff,stroke:#1a4971,stroke-width:2px
+    classDef stop fill:#c53030,color:#fff,stroke:#822727
+    classDef note fill:none,stroke:#999,stroke-dasharray: 4 3,color:#888
+    classDef eval fill:#2f3542,color:#eee,stroke:#57606f
+
+    class HUMAN human
+    class STOP1,STOP2 stop
+    class NOTEDUP,NOTE1 note
+    class EVALPATH,PROFILES,RUNP,V3,PASS1,FAIL1,PIPE,FAIL2,PASS2,TABLE eval
