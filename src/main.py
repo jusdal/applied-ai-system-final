@@ -10,6 +10,7 @@ You will implement the functions in recommender.py:
 """
 
 import argparse
+import logging
 
 from tabulate import tabulate
 
@@ -17,9 +18,13 @@ from src.recommender import (
     DEFAULT_ARTIST_PENALTY,
     DEFAULT_WEIGHTS,
     RANKING_STRATEGIES,
+    ProfileValidationError,
     load_songs,
     recommend_with_strategy,
 )
+from src.reliability import AgreementResult, compute_agreement, confidence_label
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +63,20 @@ def format_recommendations(recommendations) -> str:
     )
 
 
+def format_confidence(agreement: AgreementResult, label: str) -> str:
+    """Render an AgreementResult as a confidence line, with a warning banner if Low."""
+    line = (
+        f"Confidence: {label} ({agreement.confidence:.2f}) "
+        f"— #1 agreement {agreement.top1_agreement:.0%}, top-5 overlap {agreement.avg_jaccard:.0%}"
+    )
+    if label == "Low":
+        line = (
+            f"⚠  LOW CONFIDENCE — the ranking strategies disagree significantly on this "
+            f"recommendation; treat it with caution.\n{line}"
+        )
+    return line
+
+
 def main() -> None:
     args = parse_args()
     songs = load_songs("data/songs.csv")
@@ -90,17 +109,31 @@ def main() -> None:
     diversify_label = f", diversify (penalty {args.artist_penalty})" if args.diversify else ""
     print(f"\nRanking mode: {mode_label} ({args.mode}){diversify_label}")
     for profile_name, user_prefs in user_profiles.items():
-        recommendations = recommend_with_strategy(
-            user_prefs,
-            songs,
-            k=5,
-            mode=args.mode,
-            diversify=args.diversify,
-            artist_penalty=args.artist_penalty,
-        )
+        try:
+            recommendations = recommend_with_strategy(
+                user_prefs,
+                songs,
+                k=5,
+                mode=args.mode,
+                diversify=args.diversify,
+                artist_penalty=args.artist_penalty,
+            )
+
+            agreement = compute_agreement(user_prefs, songs, k=5)
+        except ProfileValidationError as exc:
+            print(f"\n=== {profile_name} ===")
+            print(f"-> INVALID PROFILE: {exc}")
+            continue
+        except Exception as exc:
+            print(f"\n=== {profile_name} ===")
+            print(f"-> FAILED: {type(exc).__name__}: {exc}")
+            continue
+
+        label = confidence_label(agreement.confidence)
 
         print(f"\n=== {profile_name} ===")
         print(format_recommendations(recommendations))
+        print(format_confidence(agreement, label))
 
     # Adversarial / edge-case profiles: each targets a specific weak point in
     # score_song (contradictory signals, missing keys, case sensitivity,
@@ -162,6 +195,9 @@ def main() -> None:
                 diversify=args.diversify,
                 artist_penalty=args.artist_penalty,
             )
+        except ProfileValidationError as exc:
+            print(f"-> INVALID PROFILE: {exc}")
+            continue
         except Exception as exc:
             print(f"-> FAILED: {type(exc).__name__}: {exc}")
             continue
