@@ -106,6 +106,105 @@ chosen ranking strategy first, then applies the artist penalty on top of whateve
 that strategy produced. See the model card's "Diversity / fairness" note for how this
 affects fairness, and "Diversity comparison" below for a real before/after.
 
+### Reliability & Confidence Scoring (Ensemble Agreement)
+
+`src/reliability.py` treats the three ranking strategies in `RANKING_STRATEGIES`
+(`balanced`, `genre-first`, `energy-similarity`) as an implicit ensemble: all three
+score songs with the same `score_song()`, but disagree on how to *order* them. When
+they land on the same top pick, that's a signal the recommendation is robust to how
+you rank, not just how you score. When they scatter, the "best" answer is really just
+whichever strategy happened to be selected — a much shakier basis for trust.
+
+`compute_agreement(user_prefs, songs, weights, k)` runs every registered strategy
+against the same profile and combines two signals into one 0-1 confidence score:
+
+| Signal | What it measures | Weight |
+| --- | --- | --- |
+| `top1_agreement` | Fraction of strategies whose #1 pick matches the most common #1 pick | 0.6 |
+| `avg_jaccard` | Average pairwise Jaccard overlap between strategies' top-`k` sets | 0.4 |
+
+`confidence_label()` buckets the resulting score into **High** (≥0.75), **Medium**
+(≥0.45), or **Low** (below 0.45). `src/main.py` renders this as a badge under each
+recommendation table via `format_confidence()`, with a `⚠ LOW CONFIDENCE` warning
+banner when the label is Low — see "Confidence badge examples" below for real output,
+including a constructed Low case.
+
+**Why confidence is computed pre-diversity, deliberately:** `compute_agreement()`
+always reruns all three strategies *without* the `--diversify` artist penalty, even
+when the recommendation on screen was diversified. Diversity re-sorts an already-good
+list to spread it across artists — it doesn't change whether the underlying strategies
+agree on what counts as a good match. Feeding the diversified order into the agreement
+calculation would conflate two different questions ("do the strategies agree on
+quality?" vs. "did we then spread the results across artists?") and would make a list
+*less* confident purely because it got fairer — the wrong thing to penalize. See the
+`NOTE1` callout in [`diagrams/architecture.mmd`](diagrams/architecture.mmd) for the
+same rule diagrammed.
+
+### Guardrails / Input Validation
+
+`validate_user_prefs()` (in `src/recommender.py`) checks a `user_prefs` dict before
+it's allowed anywhere near scoring:
+
+- `genre` and `mood` must be present and non-empty strings
+- `energy` must be present, numeric, and within `[0, 1]` — booleans are explicitly
+  rejected even though `isinstance(True, int)` is `True` in Python and `0 <= True <=
+  1`, so a stray `energy: True` can't silently score as `energy: 1.0`
+
+Any violation raises `ProfileValidationError` (a `ValueError` subclass) with every
+problem collected into one message, and logs it via `logger.error()`, instead of
+letting the first missing key surface as an opaque crash three frames deep in
+`score_song()`.
+
+**This used to be a gap**: only `recommend_with_strategy()` called
+`validate_user_prefs()`. `compute_agreement()` didn't, so a profile that never reached
+`recommend_with_strategy()` first — or was passed straight to the reliability layer —
+could still blow up with a raw `KeyError`. Before the fix, running the "Missing Genre
+Key" profile (`{mood: chill, energy: 0.4}`, no `genre`) straight through
+`compute_agreement()` produced this real traceback:
+
+```
+Traceback (most recent call last):
+  File "repro.py", line 9, in <module>
+    compute_agreement(prefs, songs, k=5)
+  File "src/reliability.py", line 68, in compute_agreement
+    ranked = strategy.rank(user_prefs, songs, weights)
+  File "src/recommender.py", line 199, in rank
+    return recommend_songs(user_prefs, songs, k=len(songs), weights=weights)
+  File "src/recommender.py", line 167, in recommend_songs
+    score, reasons = score_song(user_prefs, song, weights)
+  File "src/recommender.py", line 145, in score_song
+    if song["genre"] == user_prefs["genre"]:
+KeyError: 'genre'
+```
+
+**After the fix**, `compute_agreement()` calls `validate_user_prefs()` first, so the
+exact same input now fails fast with a clear, actionable message instead:
+
+```
+ERROR: Invalid user profile: missing required field 'genre'
+```
+
+(logged via `logger.error()`, then raised as `ProfileValidationError` — `src/main.py`
+catches it and prints `-> INVALID PROFILE: <message>` for that profile instead of
+crashing the whole run.) `validate_user_prefs()` is now called at the top of **both**
+entry points — `recommend_with_strategy()` and `compute_agreement()` — so every path
+into scoring sees the same checks, independently, with no shared state between the two
+calls.
+
+### Architecture Diagram
+
+[`diagrams/architecture.mmd`](diagrams/architecture.mmd) is a Mermaid flowchart of the
+full pipeline: CLI args and a `user_prefs` dict feed into the two independent
+`validate_user_prefs()` calls, valid profiles flow into `recommend_with_strategy()`
+(strategy selection → scoring → optional `--diversify`) and into `compute_agreement()`
+(all three strategies run unconditionally → agreement → confidence label), and both
+outputs meet at `format_recommendations()` / `format_confidence()` for the human
+review point. It also documents `eval.py` as a separate, offline dev/CI path that
+exercises the same `validate_user_prefs → recommend_with_strategy → compute_agreement`
+pipeline against a fixed set of profiles, and calls out the two deliberate design
+notes described above (validation runs twice with no shared state; confidence is
+always computed pre-diversity).
+
 ---
 
 ## Getting Started
@@ -149,6 +248,64 @@ pytest
 ```
 
 You can add more tests in `tests/test_recommender.py`.
+
+### Running the Evaluation Harness (eval.py)
+
+`eval.py` is a standalone, CI-friendly harness for the reliability pipeline. It reuses
+`src/recommender.py` and `src/reliability.py` directly — no scoring or ranking logic
+is reimplemented — and runs a fixed list of 10 profiles (the 3 core taste profiles
+plus 7 adversarial/edge-case profiles, including "Boolean Energy" —
+`energy: True` — which specifically exercises the bool-vs-numeric guardrail described
+above) through the full `validate_user_prefs → recommend_with_strategy →
+compute_agreement` pipeline. For each profile it checks:
+
+- Whether validation accepted/rejected the input as expected (`expect_valid` in the
+  `PROFILES` list)
+- Whether scoring and agreement computation complete without an unexpected crash
+- That a confidence score/label comes out the other end for every profile that passes
+  validation
+
+Run it with:
+
+```bash
+python eval.py
+```
+
+It prints a PASS/FAIL table and exits `0` only if every profile passes (`1`
+otherwise), so it's safe to wire into CI. Real output from a local run:
+
+```
+============ EVAL SUMMARY ============
+
+╒═════════════════════╤═════════════╤═══════════════╤════════════════════════════════════════════════════════╕
+│ Profile             │ Pass/Fail   │ Confidence    │ Notes                                                  │
+╞═════════════════════╪═════════════╪═══════════════╪════════════════════════════════════════════════════════╡
+│ High-Energy Pop     │ PASS        │ Medium (0.71) │ processed normally                                     │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Chill Lofi          │ PASS        │ High (0.91)   │ processed normally                                     │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Deep Intense Rock   │ PASS        │ High (1.00)   │ processed normally                                     │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Missing Genre Key   │ PASS        │ -             │ validation caught invalid input as expected (no crash) │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Case Mismatch       │ PASS        │ High (0.91)   │ validation passed input through as expected; scored    │
+│                     │             │               │ without crashing                                       │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Unknown Genre       │ PASS        │ High (0.80)   │ validation passed input through as expected; scored    │
+│                     │             │               │ without crashing                                       │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Out-of-Range Energy │ PASS        │ -             │ validation caught invalid input as expected (no crash) │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Empty Genre/Mood    │ PASS        │ -             │ validation caught invalid input as expected (no crash) │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Conflicting         │ PASS        │ High (0.80)   │ validation passed input through as expected; scored    │
+│ Energy/Mood         │             │               │ without crashing                                       │
+├─────────────────────┼─────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ Boolean Energy      │ PASS        │ -             │ validation caught invalid input as expected (no crash) │
+╘═════════════════════╧═════════════╧═══════════════╧════════════════════════════════════════════════════════╛
+
+10/10 passed
+```
 
 ---
 
@@ -451,6 +608,74 @@ At these weights, `balanced` has already stopped favoring the mismatched rock so
 ```
 
 Same five songs, different order: Focus Flow (LoRoom's second pick) drops from #3 to #4, its score docked 1.5 points for repeating an artist already on the list, and Spacewalk Thoughts (a different artist, Orbit Bloom) moves up to #3 in its place.
+
+### Confidence badge examples
+
+`python -m src.main` prints a confidence badge under every core taste profile's table
+(see "Reliability & Confidence Scoring" above for how it's computed). Real output from
+a local run — the three core profiles land at Medium and High:
+
+```bash
+python -m src.main
+```
+
+```
+=== High-Energy Pop ===
+[... table omitted, see "Core taste profiles" above ...]
+Confidence: Medium (0.71) — #1 agreement 67%, top-5 overlap 78%
+
+=== Chill Lofi ===
+[... table omitted, see "Core taste profiles" above ...]
+Confidence: High (0.91) — #1 agreement 100%, top-5 overlap 78%
+
+=== Deep Intense Rock ===
+[... table omitted, see "Core taste profiles" above ...]
+Confidence: High (1.00) — #1 agreement 100%, top-5 overlap 100%
+```
+
+None of the three built-in profiles happen to land in **Low** territory, so below is a
+**custom test case** — not one of the three taste profiles `python -m src.main` ships
+by default, and not in `PROFILES` in `eval.py` either — built specifically to make the
+strategies disagree: `genre: metal` (only one metal song in the catalog, and it's
+high-energy) crossed with a low-energy, low-key target (`energy: 0.2, mood: chill`)
+that no metal song is close to. Run it yourself with a one-off script calling
+`recommend_with_strategy()` / `compute_agreement()` directly, the same way this output
+was captured. `balanced`, `genre-first`, and `energy-similarity` each pick a
+*different* song for #1:
+
+```
+=== [CUSTOM TEST CASE] Metal/Chill Contradiction (not a shipped default profile) ===
+Profile: {'genre': 'metal', 'mood': 'chill', 'energy': 0.2, 'likes_acoustic': True}
+╒═════╤════════════════════╤════════════════╤═════════╤══════════════════════════════════════════════╕
+│   # │ Title              │ Artist         │   Score │ Why                                          │
+╞═════╪════════════════════╪════════════════╪═════════╪══════════════════════════════════════════════╡
+│   1 │ Spacewalk Thoughts │ Orbit Bloom    │    3.84 │ mood match (+1.0), energy closeness (+1.84), │
+│     │                    │                │         │ acoustic match (+1.0)                        │
+├─────┼────────────────────┼────────────────┼─────────┼──────────────────────────────────────────────┤
+│   2 │ Library Rain       │ Paper Lanterns │    3.7  │ mood match (+1.0), energy closeness (+1.70), │
+│     │                    │                │         │ acoustic match (+1.0)                        │
+├─────┼────────────────────┼────────────────┼─────────┼──────────────────────────────────────────────┤
+│   3 │ Midnight Coding    │ LoRoom         │    3.56 │ mood match (+1.0), energy closeness (+1.56), │
+│     │                    │                │         │ acoustic match (+1.0)                        │
+├─────┼────────────────────┼────────────────┼─────────┼──────────────────────────────────────────────┤
+│   4 │ Moonlit Sonata     │ Elena Voss     │    3    │ energy closeness (+2.00), acoustic match     │
+│     │ Reimagined         │                │         │ (+1.0)                                       │
+├─────┼────────────────────┼────────────────┼─────────┼──────────────────────────────────────────────┤
+│   5 │ Riverbend Ashes    │ Hollow Pine    │    2.8  │ energy closeness (+1.80), acoustic match     │
+│     │                    │                │         │ (+1.0)                                       │
+╘═════╧════════════════════╧════════════════╧═════════╧══════════════════════════════════════════════╛
+⚠  LOW CONFIDENCE — the ranking strategies disagree significantly on this recommendation; treat it with caution.
+Confidence: Low (0.43) — #1 agreement 33%, top-5 overlap 59%
+```
+
+All three strategies pick a *different* #1: `balanced` (the table above) lands on
+"Spacewalk Thoughts" because no metal song is close enough on mood/energy to win on
+weighted score alone; `genre-first` forces the catalog's only metal song, "Iron
+Descent," to #1 regardless of its energy/mood mismatch, because its hard tier doesn't
+care about anything else; and `energy-similarity` — which ignores genre and mood
+entirely — lands on "Moonlit Sonata Reimagined," whose energy (0.20) is a near-exact
+match for the 0.2 target. Zero overlap on #1 across all three strategies is exactly
+the disagreement the confidence score is designed to surface.
 
 **Screenshot or video** _(optional)_: <!-- Insert a screenshot or demo video link here -->
 
