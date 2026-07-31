@@ -1,17 +1,29 @@
 # 🎵 Music Recommender Simulation
 
-## Project Summary
+## Base Project & Scope of This Extension
 
-In this project you will build and explain a small music recommender system.
+**Base project:** Music Recommender Simulation, originally built for Module 3 of this
+course (github.com/jusdal/ai110-module3show-musicrecommendersimulation).
 
-Your goal is to:
+**Original goal and capabilities:** the base project is a content-based music
+recommender with no collaborative filtering and no user history — it scores each song
+in a small catalog against a single stated `UserProfile` (favorite genre, favorite
+mood, target energy, acoustic preference) using a weighted rule-based `score_song()`
+function, then returns the top-k matches with a human-readable "why" explanation for
+each. It supports three interchangeable ranking strategies (`balanced`, `genre-first`,
+`energy-similarity`) via a Strategy pattern, plus an optional artist-diversity
+penalty (`--diversify`) to prevent one artist from dominating the results. This
+original version had no input validation (malformed profiles caused raw crashes) and
+no way to signal how confident a given recommendation was.
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-Replace this paragraph with your own summary of what your version does.
+**What this Project 4 submission adds:** three new AI/reliability components layered
+on top of that unchanged core — (1) input validation guardrails that catch malformed
+profiles cleanly instead of crashing, (2) an ensemble reliability/confidence scorer
+that checks whether the three existing ranking strategies agree on the top pick, with
+the result surfaced directly in the CLI output, and (3) an `eval.py` test harness that
+exercises both against 10 known profiles. See "Reliability & Confidence Scoring" and
+"Guardrails / Input Validation" below for details, and `diagrams/architecture.mmd` for
+how these pieces fit into the runtime pipeline.
 
 ---
 
@@ -41,12 +53,12 @@ Most real-world recommenders (Spotify, Netflix, YouTube) blend two approaches: c
 
 Each song is scored independently against the user's profile by summing points from four rules, then all songs are sorted by that score and the top `k` are returned:
 
-| Rule | Condition | Points |
-| --- | --- | --- |
-| Genre match | `song.genre == favorite_genre` | `+2.0` |
-| Mood match | `song.mood == favorite_mood` | `+1.0` |
-| Energy closeness | scaled by distance from `target_energy` | `2.0 * (1 - abs(song.energy - target_energy))` (0 to 2.0) |
-| Acoustic threshold | `likes_acoustic` is `True` and `song.acousticness > 0.6` | `+1.0` |
+| Rule               | Condition                                                | Points                                                    |
+| ------------------ | -------------------------------------------------------- | --------------------------------------------------------- |
+| Genre match        | `song.genre == favorite_genre`                           | `+2.0`                                                    |
+| Mood match         | `song.mood == favorite_mood`                             | `+1.0`                                                    |
+| Energy closeness   | scaled by distance from `target_energy`                  | `2.0 * (1 - abs(song.energy - target_energy))` (0 to 2.0) |
+| Acoustic threshold | `likes_acoustic` is `True` and `song.acousticness > 0.6` | `+1.0`                                                    |
 
 Genre gets the largest flat bonus because it's the strongest single predictor of whether a listener will even give a song a chance. Energy is scaled rather than flat so a near-miss (0.40 vs. a target of 0.35) still earns most of its points, instead of an all-or-nothing cliff. Acousticness is a threshold rather than a scaled score because `likes_acoustic` is a boolean preference, not a target value to converge on.
 
@@ -62,11 +74,11 @@ strategies still call `score_song()` for the per-song score and "why" explanatio
 switching strategies never changes what a song's explanation says — only the order the
 songs come back in.
 
-| Mode (`--mode`) | Strategy class | How it orders songs |
-| --- | --- | --- |
-| `balanced` (default) | `BalancedStrategy` | The weighted sum described above — identical to the original `recommend_songs()` behavior. |
-| `genre-first` | `GenreFirstStrategy` | Genre match is a hard tier: every genre-matching song outranks every non-matching song, no matter the weighted score. Ties within a tier fall back to the balanced score. |
-| `energy-similarity` | `EnergySimilarityStrategy` | Ignores genre/mood/acoustic for ordering entirely and sorts purely by closeness to `target_energy`. |
+| Mode (`--mode`)      | Strategy class             | How it orders songs                                                                                                                                                       |
+| -------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `balanced` (default) | `BalancedStrategy`         | The weighted sum described above — identical to the original `recommend_songs()` behavior.                                                                                |
+| `genre-first`        | `GenreFirstStrategy`       | Genre match is a hard tier: every genre-matching song outranks every non-matching song, no matter the weighted score. Ties within a tier fall back to the balanced score. |
+| `energy-similarity`  | `EnergySimilarityStrategy` | Ignores genre/mood/acoustic for ordering entirely and sorts purely by closeness to `target_energy`.                                                                       |
 
 `RANKING_STRATEGIES` is a `{mode_name: strategy_instance}` registry, and
 `recommend_with_strategy(user_prefs, songs, k, mode, weights)` looks a strategy up by
@@ -80,7 +92,7 @@ python -m src.main --mode energy-similarity
 The default run (no flag, or `--mode balanced`) also prints a **ranking mode
 comparison** for the "Calm Rock Contradiction" profile (rock genre, peaceful mood, low
 energy — the same profile the bias example above is built on) under the weight-shift
-experiment's *shifted* weights. That comparison is the clearest illustration of why mode
+experiment's _shifted_ weights. That comparison is the clearest illustration of why mode
 and weights are genuinely different levers: under shifted weights, `balanced` already
 stops favoring the mismatched rock song, but `genre-first` still forces it to #1 —
 because its tier is a hard rule, not a number that weight-tuning can out-vote.
@@ -110,7 +122,7 @@ affects fairness, and "Diversity comparison" below for a real before/after.
 
 `src/reliability.py` treats the three ranking strategies in `RANKING_STRATEGIES`
 (`balanced`, `genre-first`, `energy-similarity`) as an implicit ensemble: all three
-score songs with the same `score_song()`, but disagree on how to *order* them. When
+score songs with the same `score_song()`, but disagree on how to _order_ them. When
 they land on the same top pick, that's a signal the recommendation is robust to how
 you rank, not just how you score. When they scatter, the "best" answer is really just
 whichever strategy happened to be selected — a much shakier basis for trust.
@@ -118,10 +130,10 @@ whichever strategy happened to be selected — a much shakier basis for trust.
 `compute_agreement(user_prefs, songs, weights, k)` runs every registered strategy
 against the same profile and combines two signals into one 0-1 confidence score:
 
-| Signal | What it measures | Weight |
-| --- | --- | --- |
-| `top1_agreement` | Fraction of strategies whose #1 pick matches the most common #1 pick | 0.6 |
-| `avg_jaccard` | Average pairwise Jaccard overlap between strategies' top-`k` sets | 0.4 |
+| Signal           | What it measures                                                     | Weight |
+| ---------------- | -------------------------------------------------------------------- | ------ |
+| `top1_agreement` | Fraction of strategies whose #1 pick matches the most common #1 pick | 0.6    |
+| `avg_jaccard`    | Average pairwise Jaccard overlap between strategies' top-`k` sets    | 0.4    |
 
 `confidence_label()` buckets the resulting score into **High** (≥0.75), **Medium**
 (≥0.45), or **Low** (below 0.45). `src/main.py` renders this as a badge under each
@@ -130,13 +142,13 @@ banner when the label is Low — see "Confidence badge examples" below for real 
 including a constructed Low case.
 
 **Why confidence is computed pre-diversity, deliberately:** `compute_agreement()`
-always reruns all three strategies *without* the `--diversify` artist penalty, even
+always reruns all three strategies _without_ the `--diversify` artist penalty, even
 when the recommendation on screen was diversified. Diversity re-sorts an already-good
 list to spread it across artists — it doesn't change whether the underlying strategies
 agree on what counts as a good match. Feeding the diversified order into the agreement
 calculation would conflate two different questions ("do the strategies agree on
 quality?" vs. "did we then spread the results across artists?") and would make a list
-*less* confident purely because it got fairer — the wrong thing to penalize. See the
+_less_ confident purely because it got fairer — the wrong thing to penalize. See the
 `NOTE1` callout in [`diagrams/architecture.mmd`](diagrams/architecture.mmd) for the
 same rule diagrammed.
 
@@ -148,7 +160,7 @@ it's allowed anywhere near scoring:
 - `genre` and `mood` must be present and non-empty strings
 - `energy` must be present, numeric, and within `[0, 1]` — booleans are explicitly
   rejected even though `isinstance(True, int)` is `True` in Python and `0 <= True <=
-  1`, so a stray `energy: True` can't silently score as `energy: 1.0`
+1`, so a stray `energy: True` can't silently score as `energy: 1.0`
 
 Any violation raises `ProfileValidationError` (a `ValueError` subclass) with every
 problem collected into one message, and logs it via `logger.error()`, instead of
@@ -507,7 +519,7 @@ Summary Table" stretch feature.
 
 ### Ranking mode comparison
 
-`python -m src.main` also runs the "Calm Rock Contradiction" profile (`{genre: rock, mood: peaceful, energy: 0.35, likes_acoustic: False}`) through all three ranking modes under the weight-shift experiment's shifted weights (`genre: 1.0, energy: 4.0`), to isolate what changing the ranking *strategy* does versus changing the *weights*:
+`python -m src.main` also runs the "Calm Rock Contradiction" profile (`{genre: rock, mood: peaceful, energy: 0.35, likes_acoustic: False}`) through all three ranking modes under the weight-shift experiment's shifted weights (`genre: 1.0, energy: 4.0`), to isolate what changing the ranking _strategy_ does versus changing the _weights_:
 
 ```
 -- Balanced (balanced) --
@@ -641,7 +653,7 @@ high-energy) crossed with a low-energy, low-key target (`energy: 0.2, mood: chil
 that no metal song is close to. Run it yourself with a one-off script calling
 `recommend_with_strategy()` / `compute_agreement()` directly, the same way this output
 was captured. `balanced`, `genre-first`, and `energy-similarity` each pick a
-*different* song for #1:
+_different_ song for #1:
 
 ```
 === [CUSTOM TEST CASE] Metal/Chill Contradiction (not a shipped default profile) ===
@@ -668,7 +680,7 @@ Profile: {'genre': 'metal', 'mood': 'chill', 'energy': 0.2, 'likes_acoustic': Tr
 Confidence: Low (0.43) — #1 agreement 33%, top-5 overlap 59%
 ```
 
-All three strategies pick a *different* #1: `balanced` (the table above) lands on
+All three strategies pick a _different_ #1: `balanced` (the table above) lands on
 "Spacewalk Thoughts" because no metal song is close enough on mood/energy to win on
 weighted score alone; `genre-first` forces the catalog's only metal song, "Iron
 Descent," to #1 regardless of its energy/mood mismatch, because its hard tier doesn't
