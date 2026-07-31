@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from src.recommender import RANKING_STRATEGIES
+from src.recommender import RANKING_STRATEGIES, validate_user_prefs
 
 TOP1_WEIGHT = 0.6
 JACCARD_WEIGHT = 0.4
@@ -59,6 +59,8 @@ def compute_agreement(
     how much their top-k lists overlap (average pairwise Jaccard). Returns an
     AgreementResult whose `confidence` combines both signals into one score.
     """
+    validate_user_prefs(user_prefs)
+
     top_k_by_mode: Dict[str, List] = {}
     top1_by_mode: Dict[str, str] = {}
 
