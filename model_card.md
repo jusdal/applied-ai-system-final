@@ -188,3 +188,84 @@ Building this made recommenders feel a lot less like magic. It's really just a p
 **What surprised me about something this simple "feeling" like a recommendation:** ambient and jazz songs landed near the top of my chill lofi list even though neither is labeled lofi at all — they just happened to have almost identical energy and acoustic-ness. That felt like the system actually understood a "vibe," but it was really just a few numbers landing close together. It's a little unsettling how convincing four numbers can be.
 
 **What I'd try next:** actually fix genre overpowering mood instead of just documenting it, let a profile hold more than one favorite genre or mood since nobody likes just one thing, and start using the tempo/valence/danceability columns that have been sitting unused this whole time. I'd also want to test all of this again on a much bigger, more evenly-balanced catalog, to see if the single-song-genre bias I found here gets better, worse, or just harder to spot at scale.
+
+---
+
+## 10. AI Collaboration & Reliability Reflection
+
+### Limitations or biases in this system
+
+Covered in full in §6, but the short version: genre (+2.0) can outweigh an explicit
+mood or energy preference (+1.0 / up to +2.0), so a request like "peaceful rock at low
+energy" still surfaces the catalog's one high-energy, "intense" rock song over a song
+that actually matches mood and energy — see the "Calm Rock Contradiction" example in
+§6 and in `README.md`'s "Ranking mode comparison." That effect is worst for the 13 of
+15 genres that only have one song in the catalog, since there's no better-fitting
+option to fall back on. Beyond that: no lyrics or audio content, one genre/mood per
+profile, and three dataset columns (`tempo_bpm`, `valence`, `danceability`) sitting
+unused.
+
+### Could this AI be misused, and how would you prevent that?
+
+The realistic misuse here isn't malicious — it's **treating a toy rule-based scorer as
+if it were an authoritative or learned model**. Two concrete ways that could happen:
+
+- **Presenting the output as an objective claim about taste** — e.g. "the algorithm
+  says rock fans want high energy" — when it's really just one weighted sum
+  (`genre: +2.0, mood: +1.0, energy: up to +2.0, acoustic: +1.0`) that a student picked.
+  Because the genre-over-mood bias in §6 is real and reproducible, an unlabeled deployment
+  could quietly reinforce a genre stereotype instead of reflecting what a listener
+  actually asked for.
+- **Deploying it as a real personalization engine** on real user data — it was never
+  built with consent, storage, or privacy handling in mind; `UserProfile` is a
+  transient in-memory dataclass, not something designed to be persisted safely.
+
+**Mitigations already in place:** §2 explicitly labels this "classroom exploration,
+not a real app" and lists non-intended uses; every recommendation ships with a "Why"
+explanation naming the exact rule that fired (`score_song()`'s `reasons` list), so
+the scoring is legible rather than a black box — a viewer can see genre out-voted mood
+directly in the explanation text, instead of just trusting a number; and the genre
+bias is documented in §6 rather than hidden. If this were ever extended toward a real
+product, the first requirements would be an explicit consent/storage design and either
+fixing or clearly surfacing the genre-bias in the UI itself, not just in a model card.
+
+### What surprised you while testing reliability?
+
+Two things, both about the guardrail/confidence layer specifically (not the scoring
+logic covered in §7):
+
+1. **A passing eval suite hid a real crash.** `compute_agreement()` originally didn't
+   call `validate_user_prefs()` at all — only `recommend_with_strategy()` did. An
+   invalid profile fed straight to the reliability layer crashed `main()` uncaught,
+   in exactly the scenario the guardrail was built to prevent. `eval.py` still reported
+   9/9 passing the whole time, because it wraps its own calls in `try/except` and was
+   only checking "did *my* call site handle this," not "does the real runtime path
+   handle this." I only caught it by comparing the architecture diagram against the
+   actual code and noticing the two validation call sites behaved differently — a
+   reminder that a green test suite isn't the same claim as "the feature works."
+2. **Three "correct" strategies can have zero agreement, and that's not a bug.** The
+   Metal/Chill Contradiction test case (`genre: metal, mood: chill, energy: 0.2`) makes
+   `balanced`, `genre-first`, and `energy-similarity` each pick a *different* #1 song —
+   not because any strategy is broken, but because they define "best match" differently
+   on a genuinely contradictory profile. Watching the confidence score correctly drop to
+   Low (0.43) on that case, while staying High on profiles with a clean single best fit,
+   is what convinced me the agreement metric was measuring something real rather than
+   just noise between near-identical rankings.
+
+### AI collaboration: one helpful suggestion and one flawed suggestion
+
+**Helpful:** reusing the three existing ranking strategies (`balanced`, `genre-first`,
+`energy-similarity`) as an implicit ensemble for the confidence score, instead of
+building a separate reliability mechanism from scratch. It kept the new feature tightly
+integrated with the architecture that already existed rather than bolting on something
+disconnected, and it's the reason the feature was achievable in a one-day budget.
+
+**Flawed:** Claude's first pass wired input validation asymmetrically —
+`recommend_with_strategy()` called `validate_user_prefs()`, but `compute_agreement()`
+didn't, so an invalid profile passed straight to the reliability layer crashed `main()`
+uncaught (the same incident described above under "What surprised you"). It passed
+every automated test at the time, since `eval.py`'s own `try/except` masked the gap.
+I caught it by manually reviewing the architecture diagram against the real code, not
+from any test failing — which is why `validate_user_prefs()` is now called
+independently at the top of both entry points (see `README.md`'s "Guardrails / Input
+Validation" section for the before/after traceback).

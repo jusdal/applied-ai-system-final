@@ -695,25 +695,60 @@ the disagreement the confidence score is designed to surface.
 
 ## Experiments You Tried
 
-Use this section to document the experiments you ran. For example:
-
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
+- **Weight shift (genre halved 2.0→1.0, energy doubled 2.0→4.0).** Run automatically by
+  `python -m src.main` on the "Calm Rock Contradiction" profile (rock genre, peaceful
+  mood, energy 0.35). Under default weights, the catalog's one rock song (Storm Runner —
+  high energy, mood "intense") still narrowly wins on genre's flat +2.0 bonus, even
+  though it barely matches the rest of the profile. Under shifted weights, "Moonlit
+  Sonata Reimagined" — the song that actually matches mood and energy — takes over, and
+  Storm Runner drops out of the top 5 entirely. See "Sample Recommendation Output" →
+  "Ranking mode comparison" for the real tables.
+- **Ranking mode vs. weight-tuning.** Re-ran that same profile through all three
+  `--mode` strategies under the shifted weights above, to check whether `genre-first`
+  hard-tiering and "a large genre weight" were secretly doing the same thing. They
+  aren't: `balanced` responds to the reweighting and drops Storm Runner, but
+  `genre-first` still forces it to #1 regardless of score, because a hard tier isn't
+  something weight-tuning can out-vote.
+- **Diversity penalty.** Ran "Chill Lofi" with and without `--diversify`. Without it,
+  one artist (LoRoom) takes 2 of 5 slots purely because both of their songs happen to
+  fit well; with it, the weaker LoRoom pick is docked 1.5 points and a different artist
+  moves up instead. See "Diversity comparison" above for the real before/after.
+- **Different user types.** High-Energy Pop vs. Chill Lofi share zero songs in their
+  top 5 — the two profiles disagree on every axis. High-Energy Pop vs. Deep Intense
+  Rock share 4 of 5, since both target energy around 0.85–0.9. Full writeup in the
+  model card's "Comparing the profiles" section.
+- **Not tried:** adding `tempo_bpm`/`valence`/`danceability` to the score, and letting a
+  profile hold more than one favorite genre or mood — both listed as future work in
+  `model_card.md` §8.
 
 ---
 
 ## Limitations and Risks
 
-Summarize some limitations of your recommender.
+- **Tiny, lopsided catalog.** 18 songs total, and 13 of 15 genres have exactly one
+  song — a niche-genre request has no fallback if that single song is a poor fit on
+  everything else (see the "Calm Rock Contradiction" example above).
+- **Genre can override an explicit mood/energy preference.** A genre match (+2.0)
+  outweighs a mood match (+1.0) and can outweigh a partial energy mismatch, so a
+  recommendation can be genre-correct but emotionally off. This is documented, not
+  fixed — see `model_card.md` §6 for the full bias writeup.
+- **No lyrics, audio content, or listening history.** This is a purely content-based
+  recommender scored against one stated profile — it doesn't learn from behavior or
+  understand anything about a song beyond its four scored attributes.
+- **One genre, one mood, per profile.** A profile can't represent someone who
+  genuinely likes two genres equally — real listeners usually do.
+- **Three dataset columns go unused.** `tempo_bpm`, `valence`, and `danceability` are
+  loaded but never scored.
+- **Confidence is a heuristic, not a calibrated probability.** It measures whether
+  three rule-based ranking strategies agree, not whether a recommendation is
+  objectively "correct" — "High confidence" means consensus, not accuracy.
+- **Validation is duplicated, not shared.** `validate_user_prefs()` is called
+  independently in both `recommend_with_strategy()` and `compute_agreement()` with no
+  shared state — harmless today, but if one call site's rules get updated and the
+  other doesn't, that reintroduces the exact crash this guardrail was built to prevent
+  (see "A flawed AI suggestion" below).
 
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
-
-You will go deeper on this in your model card.
+You'll find a deeper dive on data, strengths, and bias in `model_card.md`.
 
 ---
 
