@@ -717,13 +717,48 @@ You will go deeper on this in your model card.
 
 ---
 
-## Reflection
+## Reflection on AI Collaboration and System Design
 
-Read and complete `model_card.md`:
+### How I used AI during development
 
-[**Model Card**](model_card.md)
+I used Claude Code throughout this project — for scaffolding the validation and
+reliability modules, wiring the CLI output, building the eval harness, and drafting
+the architecture diagram. I worked in an iterative loop: giving it scoped, specific
+prompts for one piece at a time rather than asking for the whole feature set at once,
+then testing and reviewing before moving on. I also used it to reason through design
+decisions — like whether the confidence score should account for `--diversify` or be
+computed independently of it — rather than just accepting the first implementation it
+produced.
 
-Write 1 to 2 paragraphs here about what you learned:
+### A helpful AI suggestion
 
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
+The idea to reuse the three existing ranking strategies as an implicit ensemble for
+measuring confidence — rather than building a separate mechanism from scratch — felt
+obviously right as soon as it was suggested. It kept the new feature tightly
+integrated with the existing architecture instead of bolting on something
+disconnected, and it's a big part of why the feature was achievable in a one-day
+budget.
+
+### A flawed AI suggestion
+
+The initial implementation wired validation asymmetrically: `recommend_with_strategy()`
+caught `ProfileValidationError` cleanly, but `compute_agreement()` didn't — so an
+invalid profile would crash `main()` uncaught, in exactly the scenario the guardrail
+feature was supposed to prevent. The bug passed all automated tests, since `eval.py`
+wraps its own calls in a try/except and reported 9/9 passing regardless. I only caught
+it by reviewing the architecture diagram against the real code and noticing the two
+validation call sites behaved differently. It was a reminder that I'd assumed passing
+tests meant the feature worked — but the tests were only checking what they were
+written to check, not the actual runtime behavior a real user would hit.
+
+### Limitations and future improvements
+
+The redundant validation is the limitation that bothers me most: both
+`recommend_with_strategy()` and `compute_agreement()` independently call
+`validate_user_prefs()` on the same input, with no shared state between them. It's
+functionally harmless today, but it's exactly the kind of duplication that tends to
+drift out of sync over time — if one call site's validation logic gets updated and the
+other doesn't, that's a new version of the same bug I just fixed. If I had another day,
+the first thing I'd do is collapse this into a single shared validation gate — validate
+once, and pass a validated object downstream to both functions — so there's one source
+of truth instead of two independently-maintained copies of the same check.
