@@ -1,7 +1,10 @@
 import csv
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Song:
@@ -92,6 +95,45 @@ def load_songs(csv_path: str) -> List[Dict]:
     return songs
 
 DEFAULT_WEIGHTS = {"genre": 2.0, "mood": 1.0, "energy": 2.0, "acoustic": 1.0}
+
+
+class ProfileValidationError(ValueError):
+    """Raised when a user_prefs/UserProfile dict is missing or has invalid fields."""
+
+
+def validate_user_prefs(user_prefs: Dict) -> Dict:
+    """
+    Validate a user_prefs dict before it's used for scoring.
+
+    Checks that genre/mood are present and non-empty, and that energy is a
+    number within [0, 1]. Raises ProfileValidationError (and logs it) with a
+    clear message instead of letting a bare KeyError/TypeError surface from
+    deep inside score_song.
+    """
+    errors = []
+
+    for field in ("genre", "mood"):
+        value = user_prefs.get(field)
+        if value is None:
+            errors.append(f"missing required field '{field}'")
+        elif isinstance(value, str) and value.strip() == "":
+            errors.append(f"field '{field}' cannot be empty")
+
+    if "energy" not in user_prefs or user_prefs["energy"] is None:
+        errors.append("missing required field 'energy'")
+    else:
+        energy = user_prefs["energy"]
+        if not isinstance(energy, (int, float)) or isinstance(energy, bool):
+            errors.append(f"field 'energy' must be numeric, got {energy!r}")
+        elif not (0.0 <= energy <= 1.0):
+            errors.append(f"field 'energy' must be within [0, 1], got {energy}")
+
+    if errors:
+        message = "Invalid user profile: " + "; ".join(errors)
+        logger.error(message)
+        raise ProfileValidationError(message)
+
+    return user_prefs
 
 
 def score_song(user_prefs: Dict, song: Dict, weights: Optional[Dict] = None) -> Tuple[float, List[str]]:
@@ -257,6 +299,7 @@ def recommend_with_strategy(
             f"Unknown ranking mode {mode!r}. Choose from {sorted(RANKING_STRATEGIES)}."
         ) from None
 
+    validate_user_prefs(user_prefs)
     ranked = strategy.rank(user_prefs, songs, weights)
     if diversify:
         return apply_artist_diversity(ranked, k, artist_penalty)
